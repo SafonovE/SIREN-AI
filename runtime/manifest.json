@@ -1,0 +1,14 @@
+{
+  "platform": "win32-x64",
+  "node": {
+    "version": "24.19.0",
+    "file": "node.exe",
+    "sha256": "3602f2bb1a10f2cbab4c36886218a33c1ab3db87290e73b033c46c77147d0237"
+  },
+  "poppler": {
+    "version": "26.07.0",
+    "directory": "poppler",
+    "pdfinfoSha256": "a21d3fb3c695d7aa566745c7b2874315636a9914ef135d890058d589511d1db0",
+    "pdftoppmSha256": "8c1e0b47a78291488bed8c0a03f7401e87292df0b6c25bf643b6ed548916fdf5"
+  }
+}

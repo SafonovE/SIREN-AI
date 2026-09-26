@@ -1,0 +1,37 @@
+SIREN AI — THIRD-PARTY NOTICES
+==============================
+
+Эта переносимая сборка включает сторонние исполняемые компоненты. Siren AI не изменяет условия их лицензий. Актуальный перечень файлов и контрольные суммы сборки находится в runtime\manifest.json.
+
+1. Node.js 24.19.0 (Windows x64)
+--------------------------------
+
+Project: Node.js
+Website: https://nodejs.org/
+Source and license information: https://github.com/nodejs/node
+Primary license: MIT License. Дистрибутив Node.js также включает компоненты с собственными совместимыми лицензиями; их полный перечень приведен в официальном файле LICENSE соответствующего выпуска.
+
+Embedded file: runtime\node.exe
+
+2. Poppler 26.07.0 (Windows x64 distribution)
+------------------------------------------------
+
+Project: Poppler PDF rendering library
+Website: https://poppler.freedesktop.org/
+Source: https://gitlab.freedesktop.org/poppler/poppler
+License: GNU General Public License, version 2 or later (GPL-2.0-or-later), с отдельными лицензиями для некоторых включенных библиотек и данных.
+
+Embedded directory: runtime\poppler\
+Used executables include: pdfinfo.exe, pdftoppm.exe
+
+Исходный код Poppler и сведения о лицензиях доступны по указанным выше официальным ссылкам. При распространении переносимой сборки не удаляйте этот файл; отдельно проверьте требования лицензий для выбранного способа распространения.
+
+3. Windows Runtime OCR
+----------------------
+
+Siren AI вызывает системный Windows.Media.Ocr, уже входящий в Windows, через PowerShell. Этот компонент не включен в дистрибутив Siren AI отдельным бинарным файлом и регулируется условиями используемой версии Windows.
+
+NO ENDORSEMENT
+--------------
+
+Названия Node.js, Poppler, Windows и связанные товарные знаки принадлежат их правообладателям. Их упоминание означает только техническую совместимость и не является одобрением Siren AI правообладателями.

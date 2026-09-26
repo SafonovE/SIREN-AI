@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="ru" data-product="siren-ai">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Новая инструкция — Siren AI 2.0</title>
+  <link rel="stylesheet" href="web/styles-v3.css">
+  <link rel="stylesheet" href="web/ai-assistant.css">
+</head>
+<body>
+  <a class="skip-link" href="#instructionForm">К форме инструкции</a>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <div class="brand-row">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <h1>Siren <span class="brand-ai-label">AI 2.0</span></h1>
+        </div>
+        <p class="subtitle">Инструкция для КЦ и поддержки</p>
+      </div>
+
+      <div class="top-actions">
+        <div class="save-state" id="saveState" role="status" aria-live="polite">
+          <span class="save-dot" aria-hidden="true"></span>
+          <span id="saveStateText">Черновик сохранен локально</span>
+        </div>
+        <button class="button secondary" type="button" id="loadExampleBtn">Примеры</button>
+        <button class="button primary" type="button" id="openExportBtn">Проверить и выгрузить</button>
+        <button class="button danger-ghost" type="button" id="resetBtn">Очистить</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="editor" aria-label="Редактор инструкции">
+        <form id="instructionForm" autocomplete="off" novalidate>
+          <div class="form-intro">
+            <h2>Опишите изменения</h2>
+            <p>Обязательны только название инструкции и хотя бы одно поле «Стало». Остальное заполняйте при необходимости: пустые поля в результат не попадут.</p>
+          </div>
+
+          <div id="validationSummary" class="validation-summary" role="alert" tabindex="-1" hidden></div>
+
+          <section class="editor-section release-section" aria-label="Основные сведения инструкции">
+            <div class="field-grid field-grid-release">
+              <div class="field field-wide">
+                <label for="instructionTitle">Название инструкции</label>
+                <input id="instructionTitle" data-bind="title" type="text" placeholder="Обновление дашборда ИИС" aria-describedby="instructionTitleHelp">
+                <p class="field-help" id="instructionTitleHelp">Коротко назовите экран или сценарий, который меняется.</p>
+                <p class="field-error" id="instructionTitleError" hidden></p>
+              </div>
+
+              <div class="field">
+                <label for="releaseDate">Дата начала</label>
+                <!-- Native date ownership is intentional: the Windows platform picker is accepted. -->
+                <input id="releaseDate" data-bind="releaseDate" type="date" aria-describedby="releaseDateHelp">
+                <p class="field-help" id="releaseDateHelp">Можно оставить пустой, если дата еще не подтверждена.</p>
+              </div>
+
+              <div class="field">
+                <label for="rolloutMode">Формат запуска</label>
+                <input id="rolloutMode" data-bind="rolloutMode" type="text" placeholder="A/B-тест 50/50 или поэтапное включение" aria-describedby="rolloutModeHelp">
+                <p class="field-help" id="rolloutModeHelp">Пишите только подтвержденный формат и долю аудитории.</p>
+              </div>
+
+              <div class="field field-wide">
+                <label for="rolloutConditions">Общие условия запуска</label>
+                <textarea id="rolloutConditions" data-bind="rolloutConditions" rows="3" placeholder="Когда появляется изменение, кто его увидит и какие платформы не входят в запуск" aria-describedby="rolloutConditionsHelp"></textarea>
+                <p class="field-help" id="rolloutConditionsHelp">Не повторяйте эти условия в каждой карточке. Частное исключение укажите внутри нужного изменения.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="editor-section changes-section" aria-labelledby="changesHeading">
+            <div class="section-head with-action">
+              <div class="section-heading-copy">
+                <span class="section-number" aria-hidden="true">01</span>
+                <div>
+                  <h2 id="changesHeading">Изменения</h2>
+                  <p>Одна карточка — один пользовательский эффект и его скриншоты.</p>
+                </div>
+              </div>
+              <button class="button secondary" type="button" id="addChangeBtn">Добавить изменение</button>
+            </div>
+            <div class="change-spine" id="changeList"></div>
+          </section>
+
+          <section class="editor-section support-section" aria-labelledby="supportHeading">
+            <div class="section-head with-action">
+              <div class="section-heading-copy">
+                <span class="section-number" aria-hidden="true">02</span>
+                <div>
+                  <h2 id="supportHeading">Для поддержки</h2>
+                  <p>Готовые формулировки и вопросы после описания всех изменений.</p>
+                </div>
+              </div>
+              <button class="button secondary" type="button" id="buildSupportBtn">Собрать черновик</button>
+            </div>
+
+            <p class="safe-draft-note"><strong>Черновик не придумывает факты.</strong> Он объединяет только введенные условия, платформы и нюансы.</p>
+
+            <div class="comparison-grid support-grid">
+              <div class="rich-field tone-positive" data-rich-field="support.say">
+                <label id="supportSayLabel">Что можно говорить клиенту</label>
+                <div class="format-toolbar" role="toolbar" aria-label="Форматирование разрешенной формулировки"></div>
+                <div class="rich-editor" data-rich-editor="support.say" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="supportSayLabel" data-placeholder="Короткая, точная и безопасная формулировка"></div>
+              </div>
+              <div class="rich-field tone-warning" data-rich-field="support.dontSay">
+                <label id="supportDontSayLabel">Что не обещать</label>
+                <div class="format-toolbar" role="toolbar" aria-label="Форматирование ограничений"></div>
+                <div class="rich-editor" data-rich-editor="support.dontSay" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="supportDontSayLabel" data-placeholder="Какие ожидания или трактовки будут неверными"></div>
+              </div>
+            </div>
+
+            <details class="details-panel">
+              <summary>Технические детали и FAQ</summary>
+              <div class="details-panel-body">
+                <div class="rich-field" data-rich-field="support.details">
+                  <label id="supportDetailsLabel">Технические детали</label>
+                  <div class="format-toolbar" role="toolbar" aria-label="Форматирование технических деталей"></div>
+                  <div class="rich-editor rich-editor-tall" data-rich-editor="support.details" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="supportDetailsLabel" data-placeholder="Источники данных, важные проверки, формулы или ограничения"></div>
+                </div>
+
+                <div class="subsection-head">
+                  <div>
+                    <h3>Частые вопросы</h3>
+                    <p>Добавляйте только вопросы, которые действительно возникают у коллег или клиентов.</p>
+                  </div>
+                  <button class="button small secondary" type="button" id="addFaqBtn">Добавить вопрос</button>
+                </div>
+                <div id="faqList" class="faq-list"></div>
+              </div>
+            </details>
+          </section>
+
+          <div class="form-actions">
+            <button class="button primary" type="button" id="formExportBtn">Проверить и выгрузить</button>
+          </div>
+        </form>
+      </section>
+
+      <aside class="preview-panel" aria-label="Предпросмотр результата">
+        <div class="preview-toolbar">
+          <div>
+            <p class="eyebrow">Предпросмотр результата</p>
+            <h2>Так получит документ коллега</h2>
+          </div>
+          <div class="preview-tabs" role="tablist" aria-label="Вид предпросмотра">
+            <button type="button" role="tab" aria-selected="true" aria-controls="documentPreview" id="documentTab" data-preview-mode="document">Документ A4</button>
+            <button type="button" role="tab" aria-selected="false" aria-controls="slidesPreview" id="slidesTab" data-preview-mode="slides" tabindex="-1">Слайды 16:9</button>
+          </div>
+        </div>
+
+        <div class="preview-callout" id="previewCallout" role="status">
+          <span class="status-icon" aria-hidden="true">✓</span>
+          <span id="previewCalloutText">Предпросмотр обновлен</span>
+        </div>
+
+        <section class="preview-canvas" id="documentPreview" role="tabpanel" aria-labelledby="documentTab">
+          <div id="documentPages" class="document-pages"></div>
+        </section>
+        <section class="preview-canvas" id="slidesPreview" role="tabpanel" aria-labelledby="slidesTab" hidden>
+          <div id="slidePages" class="slide-pages"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <template id="changeTemplate">
+    <article class="change-card" data-change-card>
+      <span class="change-node" aria-hidden="true"></span>
+      <header class="change-card-head">
+        <div class="change-card-title">
+          <span class="change-index"></span>
+          <div>
+            <p class="change-kicker">Изменение</p>
+            <h3 class="change-title-preview">Без названия</h3>
+          </div>
+        </div>
+        <div class="card-actions" aria-label="Действия с изменением">
+          <button class="icon-button move-up" type="button" aria-label="Переместить изменение выше">↑</button>
+          <button class="icon-button move-down" type="button" aria-label="Переместить изменение ниже">↓</button>
+          <button class="button small tertiary duplicate-change" type="button">Дублировать</button>
+          <button class="icon-button danger remove-change" type="button" aria-label="Удалить изменение">×</button>
+        </div>
+      </header>
+
+      <div class="field">
+        <label data-label="title">Название изменения</label>
+        <input data-change-field="title" type="text" placeholder="Заголовок и основная информация о счете">
+        <p class="field-error" data-error="title" hidden></p>
+      </div>
+
+      <fieldset class="channel-fieldset">
+        <legend>Где меняется</legend>
+        <div class="channel-options">
+          <label><input type="checkbox" value="ios" data-channel> <span>iOS</span></label>
+          <label><input type="checkbox" value="android" data-channel> <span>Android</span></label>
+          <label><input type="checkbox" value="web" data-channel> <span>веб-ЛК</span></label>
+        </div>
+        <p class="field-error" data-error="channels" hidden></p>
+      </fieldset>
+
+      <div class="field-grid two-columns">
+        <div class="field">
+          <label data-label="location">Путь в интерфейсе</label>
+          <textarea data-change-field="location" rows="2" placeholder="Портфель → выбрать ИИС → открыть дашборд"></textarea>
+          <p class="field-error" data-error="location" hidden></p>
+        </div>
+        <div class="field">
+          <label data-label="availability">Кому и когда доступно</label>
+          <textarea data-change-field="availability" rows="2" placeholder="Android 5.81; только новая группа A/B-теста"></textarea>
+        </div>
+      </div>
+
+      <div class="comparison-grid">
+        <section class="comparison-side before-side">
+          <div class="comparison-head">
+            <div>
+              <span class="comparison-tag before">Было</span>
+              <p>Что пользователь видел или делал раньше</p>
+            </div>
+            <button class="button small tertiary add-image" type="button" data-image-role="before">Добавить скриншот</button>
+          </div>
+          <div class="rich-field" data-change-rich-field="before">
+            <div class="format-toolbar" role="toolbar" aria-label="Форматирование описания до изменения"></div>
+            <div class="rich-editor" data-change-rich="before" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Опишите прежнее состояние короткими наблюдаемыми фактами"></div>
+          </div>
+        </section>
+
+        <section class="comparison-side after-side">
+          <div class="comparison-head">
+            <div>
+              <span class="comparison-tag after">Стало</span>
+              <p>Что изменится для пользователя</p>
+            </div>
+            <button class="button small tertiary add-image" type="button" data-image-role="after">Добавить скриншот</button>
+          </div>
+          <div class="rich-field" data-change-rich-field="after">
+            <div class="format-toolbar" role="toolbar" aria-label="Форматирование описания после изменения"></div>
+            <div class="rich-editor" data-change-rich="after" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Опишите новый вид или сценарий и его заметный результат"></div>
+            <p class="field-error" data-error="after" hidden></p>
+          </div>
+        </section>
+      </div>
+
+      <div class="screenshots-block">
+        <div class="subsection-head compact">
+          <div>
+            <h4>Скриншоты этой карточки</h4>
+            <p>PNG, JPG или WebP до 20 МБ. Изображение сохраняет пропорции.</p>
+          </div>
+          <button class="button small secondary add-image" type="button" data-image-role="step">Добавить шаг или схему</button>
+        </div>
+        <input class="visually-hidden image-input" type="file" accept="image/png,image/jpeg,image/webp" multiple>
+        <div class="image-list" data-image-list></div>
+      </div>
+
+      <details class="details-panel change-details">
+        <summary>Действие клиента и подсказка поддержке</summary>
+        <div class="details-panel-body field-grid two-columns">
+          <div class="field">
+            <label data-label="clientAction">Что сделать клиенту</label>
+            <textarea data-change-field="clientAction" rows="3" placeholder="Обновить приложение, открыть экран или нажать кнопку"></textarea>
+          </div>
+          <div class="field">
+            <label data-label="supportNote">На что обратить внимание поддержке</label>
+            <textarea data-change-field="supportNote" rows="3" placeholder="Что проверить и чего не обещать"></textarea>
+          </div>
+        </div>
+      </details>
+    </article>
+  </template>
+
+  <template id="imageTemplate">
+    <article class="image-item" data-image-item>
+      <div class="image-preview-wrap"><img alt=""></div>
+      <div class="image-fields">
+        <div class="field-grid image-field-grid">
+          <div class="field">
+            <label data-image-label="role">Роль</label>
+            <!-- Native select ownership is intentional: the platform popup is accepted. -->
+            <select data-image-field="role">
+              <option value="before">Было</option>
+              <option value="after">Стало</option>
+              <option value="step">Шаг</option>
+              <option value="scheme">Схема</option>
+            </select>
+          </div>
+          <div class="field">
+            <label data-image-label="title">Название</label>
+            <input data-image-field="title" type="text" placeholder="Экран дашборда">
+          </div>
+          <div class="field field-wide">
+            <label data-image-label="caption">Что смотреть на скриншоте</label>
+            <textarea data-image-field="caption" rows="2" placeholder="Укажите элемент и связь с текстом карточки"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="image-actions" aria-label="Действия со скриншотом">
+        <button class="icon-button image-up" type="button" aria-label="Переместить скриншот выше">↑</button>
+        <button class="icon-button image-down" type="button" aria-label="Переместить скриншот ниже">↓</button>
+        <button class="icon-button danger remove-image" type="button" aria-label="Удалить скриншот">×</button>
+      </div>
+    </article>
+  </template>
+
+  <template id="faqTemplate">
+    <article class="faq-item" data-faq-item>
+      <div class="faq-index" aria-hidden="true"></div>
+      <div class="faq-fields">
+        <div class="field">
+          <label data-faq-label="question">Вопрос</label>
+          <input data-faq-field="question" type="text" placeholder="Почему у клиента остался прежний экран?">
+        </div>
+        <div class="field">
+          <label data-faq-label="answer">Ответ</label>
+          <textarea data-faq-field="answer" rows="3" placeholder="Проверьте условия запуска и опишите ожидаемое поведение"></textarea>
+        </div>
+      </div>
+      <div class="faq-actions">
+        <button class="icon-button faq-up" type="button" aria-label="Переместить вопрос выше">↑</button>
+        <button class="icon-button faq-down" type="button" aria-label="Переместить вопрос ниже">↓</button>
+        <button class="icon-button danger remove-faq" type="button" aria-label="Удалить вопрос">×</button>
+      </div>
+    </article>
+  </template>
+
+  <dialog class="modal" id="exampleDialog" aria-labelledby="exampleDialogTitle">
+    <form method="dialog" class="modal-shell">
+      <header class="modal-head">
+        <div>
+          <p class="eyebrow">Учебные материалы</p>
+          <h2 id="exampleDialogTitle">Выберите пример или чистый черновик</h2>
+        </div>
+        <button class="icon-button close-dialog" value="cancel" aria-label="Закрыть">×</button>
+      </header>
+      <div class="modal-body">
+        <p class="modal-lead">Ниже можно загрузить один из примеров.</p>
+        <div class="example-list" id="exampleList"></div>
+      </div>
+      <footer class="modal-actions"><button class="button secondary" value="cancel">Отмена</button></footer>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="exportDialog" aria-labelledby="exportDialogTitle">
+    <div class="modal-shell export-modal-shell">
+      <header class="modal-head">
+        <div>
+          <p class="eyebrow">Проверка и выгрузка</p>
+          <h2 id="exportDialogTitle">Выберите формат результата</h2>
+        </div>
+        <button class="icon-button close-dialog" type="button" data-close-dialog aria-label="Закрыть">×</button>
+      </header>
+      <div class="modal-body">
+        <div id="exportValidation" class="export-validation"></div>
+        <div class="export-grid">
+          <section class="export-format">
+            <div class="format-icon" aria-hidden="true">PDF</div>
+            <div><h3>PDF</h3><p>Точная копия страниц A4 из предпросмотра. Текст и скриншоты не расходятся с экраном.</p></div>
+            <button class="button primary export-action" type="button" data-export="pdf-exact">Скачать точную копию</button>
+          </section>
+          <section class="export-format">
+            <div class="format-icon" aria-hidden="true">DOCX</div>
+            <div><h3>Word</h3><p><strong>Точная копия</strong> повторяет A4. <strong>Редактируемый</strong> сохраняет текст, изображения и переносы как нативные элементы.</p></div>
+            <div class="format-actions">
+              <button class="button secondary export-action" type="button" data-export="docx-exact">Точная копия</button>
+              <button class="button primary export-action" type="button" data-export="docx-editable">Редактируемый</button>
+            </div>
+          </section>
+          <section class="export-format">
+            <div class="format-icon" aria-hidden="true">PPTX</div>
+            <div><h3>PowerPoint 16:9</h3><p><strong>Точная копия</strong> повторяет слайды предпросмотра. <strong>Редактируемый</strong> использует нативные текстовые блоки и не допускает наложений.</p></div>
+            <div class="format-actions">
+              <button class="button secondary export-action" type="button" data-export="pptx-exact">Точная копия</button>
+              <button class="button primary export-action" type="button" data-export="pptx-editable">Редактируемый</button>
+            </div>
+          </section>
+        </div>
+      </div>
+      <footer class="modal-actions">
+        <p id="exportBusyText" role="status" aria-live="polite"></p>
+        <button class="button secondary" type="button" data-close-dialog>Закрыть</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <dialog class="modal confirm-modal" id="confirmDialog" aria-labelledby="confirmDialogTitle" aria-describedby="confirmDialogText">
+    <div class="modal-shell">
+      <header class="modal-head"><h2 id="confirmDialogTitle">Подтвердите действие</h2></header>
+      <div class="modal-body"><p id="confirmDialogText"></p></div>
+      <footer class="modal-actions">
+        <button class="button secondary" type="button" id="confirmCancelBtn">Продолжить редактирование</button>
+        <button class="button danger" type="button" id="confirmActionBtn">Очистить черновик</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="web/jszip.min.js"></script>
+  <script src="web/pptxgen.min.js"></script>
+  <script src="web/html2canvas.min.js"></script>
+  <script src="web/jspdf.umd.min.js"></script>
+  <script src="web/examples-v3.js"></script>
+  <script src="web/model-v3.js"></script>
+  <script src="web/export-exact-v3.js"></script>
+  <script src="web/export-editable-v3.js"></script>
+  <script src="web/app-v3.js"></script>
+  <script src="web/ai-merge.js"></script>
+  <script src="web/curl-import.js"></script>
+  <script src="web/ai-assistant.js"></script>
+</body>
+</html>
