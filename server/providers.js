@@ -6,6 +6,7 @@ const { HttpError, asPlainText, clampNumber, isRecord, redactSecrets } = require
 const { parseJsonCandidate } = require("./schema");
 const { classifyProviderHttpError, classifyProviderNetworkError } = require("./provider-errors");
 const { outputSchema } = require("./output-schemas");
+const { topicRequestProfile } = require("./topic-prompts");
 
 const PROVIDERS = Object.freeze({
   openai: {
@@ -352,6 +353,8 @@ function reductionPromptText(context) {
 }
 
 function requestProfile(context, cloud) {
+  const topicProfile = topicRequestProfile(context);
+  if (topicProfile) return topicProfile;
   if (context.requestMode === "connection-test") {
     return {
       systemPrompt: CONNECTION_TEST_PROMPT,
@@ -450,9 +453,15 @@ function buildAnalyzeRequest(provider, config, credential, context) {
   }
   if (provider.family === "ollama") {
     const images = context.files.filter((file) => file.kind === "image").slice(0, 20).map((file) => file.buffer.toString("base64"));
+    // Russian text, schema generation and output must all fit; Ollama otherwise
+    // truncates the beginning of long prompts without a context-limit error.
+    const topicMode = String(context.requestMode || "").startsWith("topic-");
+    const estimate = systemPrompt.length + userText.length + maxOutputTokens + 512 + (images.length ? 2048 : 0);
+    if (topicMode && estimate > 16384) throw new HttpError(422, "TOPIC_CONTEXT_TOO_LARGE", "Выбранная тема содержит слишком много фактов для локальной модели. Уточните тему или сократите задание; факты уже обработанных материалов сохранены.");
+    const numContext = topicMode ? Math.max(4096, Math.ceil(estimate / 2048) * 2048) : 4096;
     return {
       url: validateEndpoint(config.baseUrl, config.chatPath, false),
-      options: { method: "POST", headers, body: JSON.stringify({ model, stream: false, think: false, format: outputSchema(context.requestMode), options: { temperature: 0, num_predict: maxOutputTokens, num_ctx: 4096, num_batch: 64 }, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userText, ...(images.length ? { images } : {}) }] }) },
+      options: { method: "POST", headers, body: JSON.stringify({ model, stream: false, think: false, format: outputSchema(context.requestMode, context), options: { temperature: 0, num_predict: maxOutputTokens, num_ctx: numContext, num_batch: 64 }, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userText, ...(images.length ? { images } : {}) }] }) },
       responseKind: "ollama",
     };
   }

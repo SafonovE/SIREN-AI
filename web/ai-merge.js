@@ -45,7 +45,7 @@
       .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
       .replace(/<\s*br\s*\/?>/gi, "\n")
       .replace(/<\s*\/\s*(p|div|li|ul|ol|h[1-6])\s*>/gi, "\n")
-      .replace(/<[^>]*>/g, " ");
+      .replace(/<!--[^]*?-->|<\/?[a-z][a-z0-9:-]*(?:\s[^<>]*)?\s*\/?>/gi, " ");
     return decodeEntities(source)
       .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
       .replace(/[ \t]+\n/g, "\n")

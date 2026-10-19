@@ -1,6 +1,17 @@
 "use strict";
+const { sourceLines } = require("./source-lines");
 
 const string = Object.freeze({ type: "string" });
+const strings = { type: "array", items: string };
+const record = (properties) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
+const records = (properties) => ({ type: "array", items: record(properties) });
+const bool = { type: "boolean" };
+const TOPIC_SCHEMAS = Object.freeze({
+  "topic-extract": record({ coverage: { type: "string", enum: ["complete"] }, facts: records({ statement: string, startLine: { type: "integer", minimum: 0 }, endLine: { type: "integer", minimum: 0 } }), irrelevantReason: string, warnings: strings }),
+  "topic-inspect": record({ decisions: records({ factId: string, keep: bool, supported: bool }), clarifications: { ...records({ question: { type: "string", maxLength: 180 }, reason: { type: "string", maxLength: 300 }, factIds: strings }), maxItems: 3 }, warnings: strings }),
+  "topic-compose": record({ fields: { ...records({ path: { type: "string", enum: ["title", "groups[0].items[0].before", "groups[0].items[0].after", "groups[0].items[0].clientAction", "groups[0].items[0].supportNote", "support.say"] }, text: string, factIds: { ...strings, minItems: 1 } }), maxItems: 6 }, warnings: strings }),
+  "topic-audit": record({ checks: records({ path: string, supported: bool, relevant: bool }), missingFactIds: strings, warnings: strings }),
+});
 
 const FACT_SCHEMA = Object.freeze({
   type: "object",
@@ -134,7 +145,31 @@ const SIREN_SCHEMA = Object.freeze({
   additionalProperties: false,
 });
 
-function outputSchema(requestMode) {
+function outputSchema(requestMode, context = {}) {
+  if (TOPIC_SCHEMAS[requestMode]) {
+    const ids = (context.topicFacts || []).map((fact) => fact.factId);
+    const schema = JSON.parse(JSON.stringify(TOPIC_SCHEMAS[requestMode]));
+    if (requestMode === "topic-extract") {
+      const file = context.files?.[0] || {};
+      const count = sourceLines(file.text).length;
+      const visual = file.kind === "image" && Boolean(file.buffer?.length);
+      const properties = schema.properties.facts.items.properties;
+      for (const key of ["startLine", "endLine"]) properties[key] = { type: "integer", minimum: visual ? 0 : 1, maximum: Math.max(visual ? 0 : 1, count) };
+      return schema;
+    }
+    if (!ids.length) return schema;
+    const constrain = (value, name = "") => {
+      if (!value || typeof value !== "object") return;
+      if (name === "factId") value.enum = ids;
+      if (["factIds", "missingFactIds"].includes(name)) value.items = { type: "string", enum: ids };
+      if (name === "path" && requestMode === "topic-audit" && context.topicFields?.length) value.enum = context.topicFields.map((field) => field.path);
+      for (const [key, item] of Object.entries(value)) if (key !== "enum") constrain(item, key);
+    };
+    constrain(schema);
+    if (requestMode === "topic-inspect") schema.properties.decisions.minItems = schema.properties.decisions.maxItems = ids.length;
+    if (requestMode === "topic-audit" && context.topicFields?.length) schema.properties.checks.minItems = schema.properties.checks.maxItems = context.topicFields.length;
+    return schema;
+  }
   if (requestMode === "connection-test") return CONNECTION_SCHEMA;
   if (requestMode === "fact-extraction") return FACT_SCHEMA;
   if (requestMode === "fact-reduction") return REDUCTION_SCHEMA;

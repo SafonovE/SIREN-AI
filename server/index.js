@@ -18,6 +18,7 @@ const {
 const { makeDefaultExtractors } = require("./external-tools");
 const { longFetch } = require("./long-fetch");
 const { JobManager } = require("./jobs");
+const { normalizeBrief } = require("./topic");
 const {
   HttpError,
   MAX_JSON_BYTES,
@@ -32,7 +33,7 @@ const {
 } = require("./util");
 
 const PRODUCT = "Siren AI";
-const VERSION = "2.0.0";
+const VERSION = "2.1.0";
 const CSRF_COOKIE = "siren_ai_v2_csrf";
 const CSRF_HEADER = "x-siren-csrf";
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -370,6 +371,7 @@ function createHandler(options = {}) {
       if (request.aborted || response.destroyed) analysisController.abort();
       try {
         const body = await readJson(request, options.maxJsonBytes || MAX_JSON_BYTES);
+        if (normalizeBrief(body.brief)?.topic) throw new HttpError(409, "TOPIC_JOB_REQUIRED", "Анализ по теме выполняется с сохранением этапов и уточнениями. Создайте обработку через /api/jobs или кнопку анализа в программе.");
       const provider = getProvider(body.providerId);
       const config = effectiveConfig(provider, await settings.get(provider.id));
       const boundary = dataBoundaryFor(provider, config);

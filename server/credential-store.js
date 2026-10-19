@@ -29,8 +29,8 @@ if ($operation -eq 'protect') {
 
 function defaultDataDir() {
   if (process.env.SIREN_AI_DATA_DIR) return path.resolve(process.env.SIREN_AI_DATA_DIR);
-  if (process.env.LOCALAPPDATA) return path.join(process.env.LOCALAPPDATA, "SirenAI-v2");
-  return path.join(os.homedir(), ".siren-ai-v2");
+  if (process.env.LOCALAPPDATA) return path.join(process.env.LOCALAPPDATA, "SirenAI-v2.1");
+  return path.join(os.homedir(), ".siren-ai-v2.1");
 }
 
 function powershellPath() {

@@ -1,5 +1,27 @@
 /* Siren AI assistant — extends the existing Siren visual system. */
 
+.ai-brief-panel { border-left: 4px solid var(--blue); }
+.ai-task-textarea { display: block; width: 100%; min-height: 88px; max-height: 240px; resize: none; overflow: auto; line-height: 1.5; }
+.ai-brief-panel .ai-character-counter { display: block; margin-top: 4px; text-align: right; }
+.ai-preserve-lines { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-job-topic { display: block; margin-bottom: 4px; color: var(--ink-strong); }
+.ai-brief-summary { overflow-wrap: anywhere; }
+.ai-clarifications > .ai-field { padding-top: 16px; border-top: 1px solid var(--soft); }
+.ai-clarifications textarea:disabled { color: var(--muted); background: var(--preview); }
+.ai-instruction-copy { padding: 20px; background: var(--preview); border: 1px solid var(--soft); border-radius: var(--radius-sm); line-height: 1.55; overflow-wrap: anywhere; }
+.ai-instruction-copy > * + * { margin-top: 20px; }
+.ai-instruction-copy h4, .ai-instruction-copy h5 { margin: 0 0 12px; color: var(--ink-strong); font-size: 16px; }
+.ai-instruction-copy .ai-instruction-title { font-size: 19px; }
+.ai-instruction-group + .ai-instruction-group { padding-top: 20px; border-top: 1px solid var(--line); }
+.ai-instruction-item { margin-top: 16px; }
+.ai-instruction-field + .ai-instruction-field { margin-top: 12px; }
+.ai-instruction-field > strong { display: block; margin-bottom: 3px; color: var(--ink-strong); font-size: 13px; }
+.ai-instruction-field > p { font-size: 14px; }
+@media (max-width: 600px) {
+  .ai-instruction-copy { padding: 14px; }
+  .ai-clarification-submit { white-space: normal; }
+}
+
 .ai-curl-import { margin-block: 0 20px; }
 .ai-curl-input { min-height: 140px; resize: none; font-family: var(--font-mono, Consolas, monospace); overflow: auto; }
 .ai-processing-settings { border-top: 1px solid var(--line); padding-top: 20px; margin-top: 20px; }
@@ -7,6 +29,7 @@
 .ai-job-list, .ai-job-materials { padding: 0; margin: 16px 0; list-style: none; }
 .ai-job-list { max-height: 320px; overflow: auto; scrollbar-gutter: stable; }
 .ai-job-materials { max-height: 380px; overflow: auto; scrollbar-gutter: stable; }
+.ai-job-materials.has-recovery { max-height: none; overflow: visible; scrollbar-gutter: auto; }
 .ai-job-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
 .ai-job-row > span { min-width: 0; overflow-wrap: anywhere; }
 .ai-job-row button { flex-shrink: 0; }
@@ -16,6 +39,16 @@
 .ai-job-material.is-running { border-left-color: var(--blue); }
 .ai-material-state { display: block; font-size: 13px; color: var(--muted); margin-top: 4px; }
 .ai-error-copy { color: var(--danger); white-space: pre-line; line-height: 1.5; }
+.ai-job-recovery { margin-block: 12px 0; }
+.ai-callout.ai-job-recovery p { font-size: 14px; line-height: 1.5; }
+.ai-recovery-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 12px; }
+.ai-recovery-actions > button { white-space: normal; }
+.ai-error-details { margin-top: 12px; color: var(--muted); font-size: 13px; }
+.ai-error-details summary { cursor: pointer; padding-block: 8px; font-weight: 600; }
+.ai-error-details summary:hover { color: var(--ink-strong); }
+.ai-error-details summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ai-error-details p { margin-top: 8px; }
+.ai-job-recovery .ai-error-details p { font-size: 13px; }
 .ai-durable-progress { padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--preview); min-height: 145px; }
 .ai-durable-progress progress { display: block; width: 100%; height: 8px; margin-top: 12px; accent-color: var(--teal); }
 .ai-durable-progress p { margin-block: 8px 0; }
@@ -1205,14 +1238,19 @@
   }
 
   .ai-stepper {
-    min-width: 590px;
-    padding: 0 8px;
+    min-width: 0;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding: 0;
   }
 
   .ai-step-button {
-    min-height: 52px;
-    padding: 7px 8px;
-    font-size: 12px;
+    min-height: 70px;
+    padding: 7px 3px;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .ai-step::after {

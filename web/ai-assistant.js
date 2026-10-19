@@ -26,6 +26,7 @@
   const MAX_TOTAL_BYTES = 10 * 1024 * 1024 * 1024;
   const MAX_FILES = 2000;
   const MAX_MANUAL_TEXT_CHARS = 3000000;
+  const MAX_BRIEF_CHARS = 1500;
   const MANUAL_TEXT_ID = "manual-text";
   const MANUAL_TEXT_NAME = "Введённый текст.txt";
   const PUBLIC_KINDS = new Set(["cloud", "public"]);
@@ -42,6 +43,11 @@
     settingsByProvider: new Map(),
     files: [],
     manualText: "",
+    brief: { topic: "", include: "", exclude: "", audience: "both" },
+    briefError: "",
+    clarificationAnswers: {},
+    clarificationErrors: new Set(),
+    clarificationSubmitting: false,
     step: 0,
     mergeMode: "fill-empty",
     busy: false,
@@ -185,6 +191,9 @@
 
   function resetAnalysis() {
     stopJobPolling(); state.job = null; state.uploadRequestId = "";
+    state.clarificationAnswers = {};
+    state.clarificationErrors = new Set();
+    state.clarificationSubmitting = false;
     state.proposal = null;
     state.plan = null;
     state.selectedPaths = new Set();
@@ -563,6 +572,11 @@
 
   function defaultFileRole(file) {
     const extension = extensionOf(file.name);
+    if (IMAGE_EXTENSIONS.has(extension)) {
+      const stem = file.name.slice(0, -extension.length).replace(/\.$/, "").trim().toLowerCase();
+      if (/^(?:было|before)[\s_-]*\d*$/.test(stem)) return "before";
+      if (/^(?:стало|after)[\s_-]*\d*$/.test(stem)) return "after";
+    }
     return IMAGE_EXTENSIONS.has(extension) ? "screen" : "documentation";
   }
 
@@ -833,8 +847,16 @@
   function jobBusy(job) { return job && ["queued", "preparing", "running"].includes(job.status); }
 
   function reflectJob(job) {
+    if (state.job?.id !== job.id) {
+      state.clarificationAnswers = {};
+      state.clarificationErrors = new Set();
+    }
     state.job = job; state.busy = jobBusy(job);
-    state.progressPhase = job.status === "confirmation" ? "confirmation" : state.busy ? "server" : job.status === "complete" ? "done" : "error";
+    if (job.brief) state.brief = { topic: "", include: "", exclude: "", ...job.brief, audience: "both" };
+    for (const entry of Array.isArray(job.clarificationAnswers) ? job.clarificationAnswers : []) {
+      if (!Object.prototype.hasOwnProperty.call(state.clarificationAnswers, entry.id)) state.clarificationAnswers[entry.id] = String(entry.answer || "");
+    }
+    state.progressPhase = ["confirmation", "clarification"].includes(job.status) ? job.status : state.busy ? "server" : job.status === "complete" ? "done" : "error";
     state.piiPreflightReady = job.status === "confirmation";
     state.piiFindings = normalizePiiFindings(piiSources({ privacy: job.privacy }));
     state.analysisError = job.error?.message || "";
@@ -854,7 +876,7 @@
         else { await refreshJobs(); if (state.step === 2 && refs.dialog?.open) render(); }
       } catch (error) {
         if (generation !== state.jobPollGeneration) return;
-        state.busy = false; state.analysisError = "Связь с локальной программой прервалась. Обработка могла продолжиться. Откройте SIREN AI v 2.0 и нажмите «Обновить статус»; готовые этапы сохранены.";
+        state.busy = false; state.analysisError = "Связь с локальной программой прервалась. Обработка могла продолжиться. Откройте SIREN AI v 2.1 и нажмите «Обновить статус»; готовые этапы сохранены.";
         if (refs.dialog?.open) render();
       }
     };
@@ -862,7 +884,11 @@
   }
 
   async function openSavedJob(id) {
+    stopJobPolling();
+    const generation = state.jobPollGeneration;
     const job = await apiRequest(`/api/jobs/${id}`);
+    if (generation !== state.jobPollGeneration) return;
+    if (state.job?.id !== id) { state.files = []; state.manualText = ""; state.proposal = null; state.plan = null; state.selectedPaths = new Set(); state.applied = false; }
     state.providerId = job.providerId; reflectJob(job); state.step = 2; render();
     if (jobBusy(job)) pollJob(id);
   }
@@ -896,14 +922,24 @@
   }
 
   async function performAnalysis(forceConfirmed) {
-    if (state.busy) return;
+    if (state.busy || state.clarificationSubmitting) return;
     state.analysisError = "";
+    if (state.job?.status === "clarification") { state.step = 2; render(); return; }
     if (state.job && (state.job.status !== "uploading" || (!hasMaterials() && state.job.files.length > 0 && state.job.files.every((file) => file.uploaded === file.size)))) {
+      if (state.job.status === "confirmation" && !forceConfirmed) return;
+      const id = state.job.id;
+      state.busy = true; render();
       try {
-        if (state.job.status === "confirmation" && !forceConfirmed) return;
-        reflectJob(await apiRequest(`/api/jobs/${state.job.id}/start`, { method: "POST", body: forceConfirmed ? { confirmedNoPersonalData: true, privacyOverrideConfirmed: state.piiFindings.length > 0 } : {} }));
-        state.step = 2; render(); pollJob(state.job.id);
-      } catch (error) { state.analysisError = userFacingError(error); render(); }
+        const job = await apiRequest(`/api/jobs/${id}/start`, { method: "POST", body: forceConfirmed ? { confirmedNoPersonalData: true, privacyOverrideConfirmed: state.piiFindings.length > 0 } : {} });
+        if (state.job?.id !== id) return;
+        reflectJob(job); state.step = 2; render(); pollJob(id);
+      } catch (error) { if (state.job?.id === id) { state.busy = false; state.analysisError = userFacingError(error); render(); } }
+      return;
+    }
+    if (!state.brief.topic.trim()) {
+      state.briefError = "Укажите тему: какое изменение нужно объяснить сотруднику и клиенту.";
+      state.step = 1; render();
+      global.queueMicrotask(() => document.getElementById("aiBriefTopic")?.focus());
       return;
     }
     if (!hasMaterials() || materialLimitError()) { state.analysisError = materialLimitError() || "Добавьте хотя бы один материал."; render(); return; }
@@ -914,7 +950,7 @@
       if (!state.job) {
         state.uploadRequestId ||= global.crypto.randomUUID();
         const currentDraft = JSON.parse(JSON.stringify(global.SirenApp.getState(), (key, value) => ["dataUrl", "dataURL", "base64"].includes(key) ? undefined : value));
-        state.job = await apiRequest("/api/jobs", { method: "POST", body: { clientRequestId: state.uploadRequestId, providerId: state.providerId, mergeMode: state.mergeMode, currentDraft }, signal: state.abortController.signal });
+        state.job = await apiRequest("/api/jobs", { method: "POST", body: { clientRequestId: state.uploadRequestId, providerId: state.providerId, mergeMode: state.mergeMode, currentDraft, brief: { ...state.brief } }, signal: state.abortController.signal });
       }
       const entries = state.files.slice();
       if (hasManualText()) entries.push({ id: MANUAL_TEXT_ID, role: "documentation", file: new File([state.manualText], MANUAL_TEXT_NAME, { type: "text/plain" }) });
@@ -929,10 +965,36 @@
   }
 
   async function showJobResult() {
-    const payload = await apiRequest(`/api/jobs/${state.job.id}/result`);
+    const id = state.job.id;
+    const payload = await apiRequest(`/api/jobs/${id}/result`);
+    if (state.job?.id !== id) return;
     state.proposal = { draft: payload.proposal, evidence: payload.evidence || [], warnings: payload.warnings || [], unknowns: payload.unknowns || [] };
     state.processingInfo = payload.processing; state.mergeMode = payload.mergeMode;
     initializeSelection(); state.step = 3; render();
+  }
+
+  async function submitClarifications(proceedWithUnknowns) {
+    if (!state.job || state.job.status !== "clarification" || state.clarificationSubmitting) return;
+    const questions = (state.job.clarifications || []).slice(0, 3);
+    state.clarificationErrors = new Set(proceedWithUnknowns ? [] : questions.filter((question) => !String(state.clarificationAnswers[question.id] || "").trim()).map((question) => question.id));
+    if (state.clarificationErrors.size) {
+      render();
+      global.queueMicrotask(() => refs.body.querySelector('[data-ai-clarification][aria-invalid="true"]')?.focus());
+      return;
+    }
+    const id = state.job.id;
+    state.clarificationSubmitting = true; state.analysisError = ""; render();
+    try {
+      const answers = questions.map((question) => ({ id: question.id, answer: String(state.clarificationAnswers[question.id] || "").trim() })).filter((answer) => answer.answer);
+      const job = await apiRequest(`/api/jobs/${id}/clarifications`, { method: "POST", body: { answers, proceedWithUnknowns } });
+      if (state.job?.id !== id) return;
+      reflectJob(job);
+      if (jobBusy(job)) pollJob(id);
+    } catch (error) {
+      if (state.job?.id === id) state.analysisError = userFacingError(error, "Не удалось сохранить уточнения. Ответы остались в полях; повторите отправку или обновите статус.");
+    } finally {
+      state.clarificationSubmitting = false; render();
+    }
   }
 
   async function downloadJobResult() {
@@ -1274,12 +1336,71 @@
     refreshMaterialIndicators();
   }
 
+  function handleBriefInput(target) {
+    const key = target.dataset.aiBrief;
+    if (!["topic", "include", "exclude"].includes(key)) return;
+    state.brief[key] = String(target.value || "").replace(/\r\n?/g, "\n").replace(/\u0000/g, "").slice(0, MAX_BRIEF_CHARS);
+    if (target.value !== state.brief[key]) target.value = state.brief[key];
+    resetAnalysis();
+    if (key === "topic" && state.brief.topic.trim()) {
+      state.briefError = "";
+      target.removeAttribute("aria-invalid");
+      const error = document.getElementById("aiBriefTopicError");
+      if (error) { error.hidden = true; error.textContent = ""; }
+    }
+    const counter = document.getElementById(`${target.id}-counter`);
+    if (counter) counter.textContent = `${state.brief[key].length.toLocaleString("ru-RU")} из ${MAX_BRIEF_CHARS.toLocaleString("ru-RU")} символов`;
+    resizeTaskTextarea(target);
+    renderFooter();
+  }
+
+  function resizeTaskTextarea(target) {
+    if (!target) return;
+    target.style.height = "auto";
+    const maximum = 240;
+    target.style.height = `${Math.min(Math.max(target.scrollHeight, 88), maximum)}px`;
+    target.style.overflowY = target.scrollHeight > maximum ? "auto" : "hidden";
+  }
+
+  function renderBrief() {
+    const panel = el("section", "ai-panel ai-brief-panel");
+    panel.setAttribute("aria-labelledby", "aiBriefHeading");
+    const heading = el("h3", "ai-section-title", "Задача для ИИ"); heading.id = "aiBriefHeading";
+    panel.append(heading, el("p", "field-help", "Опишите нужное изменение. ИИ отберёт факты по этой теме, уточнит существенные пробелы и подготовит инструкцию для сотрудника КЦ и текст для клиента."));
+    const fields = [
+      { key: "topic", id: "aiBriefTopic", label: "О чём нужна инструкция — обязательно", hint: "Укажите продукт, экран и изменение. До 1500 символов.", placeholder: "Какое изменение нужно объяснить сотруднику и клиенту?" },
+      { key: "include", id: "aiBriefInclude", label: "Что обязательно раскрыть", hint: "Необязательно. Вопросы, условия и ограничения, которые нужно найти в материалах.", placeholder: "Например: как было, что изменилось, ограничения и польза для клиента." },
+      { key: "exclude", id: "aiBriefExclude", label: "Что не включать", hint: "Необязательно. Перечислите соседние темы и изменения, которые здесь не нужны.", placeholder: "Какие разделы материалов не относятся к задаче?" }
+    ];
+    for (const descriptor of fields) {
+      const input = el("textarea", "ai-task-textarea");
+      input.id = descriptor.id; input.rows = 3; input.maxLength = MAX_BRIEF_CHARS;
+      input.value = state.brief[descriptor.key]; input.placeholder = descriptor.placeholder;
+      input.spellcheck = true; input.autocomplete = "off"; input.dataset.aiBrief = descriptor.key;
+      if (descriptor.key === "topic") input.setAttribute("aria-required", "true");
+      const wrapper = field(descriptor.label, input, descriptor.hint);
+      const counter = el("p", "ai-character-counter", `${input.value.length.toLocaleString("ru-RU")} из ${MAX_BRIEF_CHARS.toLocaleString("ru-RU")} символов`);
+      counter.id = `${descriptor.id}-counter`; wrapper.append(counter);
+      const describedBy = [`${descriptor.id}-help`, counter.id];
+      if (descriptor.key === "topic") {
+        const error = el("p", "ai-error-copy", state.briefError); error.id = "aiBriefTopicError"; error.hidden = !state.briefError;
+        error.setAttribute("role", "alert"); wrapper.append(error); describedBy.push(error.id);
+        if (state.briefError) input.setAttribute("aria-invalid", "true");
+      }
+      input.setAttribute("aria-describedby", describedBy.join(" "));
+      panel.append(wrapper);
+    }
+    panel.append(el("p", "field-help", "Структура сохранится: «Было / Стало / Действия / Подсказки». Задание задаёт тему; факты ИИ берёт из материалов ниже. Задание сохранится вместе с обработкой после её запуска."));
+    return panel;
+  }
+
   function renderMaterials() {
     const fragment = document.createDocumentFragment();
     const privacy = isPublicProvider()
       ? statusCallout("warning", "Публичный облачный ИИ", "Не добавляйте персональные данные. Перед отправкой Siren AI выполнит локальную проверку и потребует подтверждение.")
       : statusCallout("info", contourLabel(providerKind()), "Материалы будут обработаны в выбранном локальном или корпоративном контуре.");
     fragment.append(privacy);
+    fragment.append(renderBrief());
 
     const mergePanel = el("section", "ai-panel");
     mergePanel.append(el("h3", "ai-section-title", "Как заполнить черновик"));
@@ -1338,7 +1459,7 @@
     const textTitle = el("div");
     const textLabel = el("label", "ai-text-material-label", "Текстовый материал");
     textLabel.htmlFor = "aiManualText";
-    textTitle.append(textLabel, el("p", "", "Можно использовать отдельно или вместе с файлами."));
+    textTitle.append(textLabel, el("p", "", "Исходные факты и описание продукта. Задачу для ИИ задайте в отдельном поле выше."));
     const textCounter = el("span", "ai-character-counter", `${state.manualText.length.toLocaleString("ru-RU")} из ${MAX_MANUAL_TEXT_CHARS.toLocaleString("ru-RU")} символов`);
     textCounter.id = "aiManualTextCounter";
     refs.manualTextCounter = textCounter;
@@ -1493,7 +1614,42 @@
     return box;
   }
 
-  const JOB_LABELS = { uploading: "Загрузка", queued: "В очереди", preparing: "Подготовка", running: "Обработка", paused: "Приостановлено", confirmation: "Нужно подтверждение", partial: "Готово частично", complete: "Готово", failed: "Нужно исправить ошибку" };
+  const JOB_LABELS = { uploading: "Загрузка", queued: "В очереди", preparing: "Подготовка", running: "Обработка", paused: "Приостановлено", confirmation: "Нужно подтверждение", clarification: "Нужно уточнение", partial: "Готово частично", complete: "Готово", failed: "Нужно исправить ошибку" };
+
+  function renderBriefSummary(brief) {
+    const section = el("section", "ai-panel ai-brief-summary");
+    section.append(el("h3", "ai-section-title", "Задача для ИИ"));
+    section.append(el("p", "ai-preserve-lines", sanitizeText(brief.topic)));
+    for (const [key, title] of [["include", "Раскрыть"], ["exclude", "Не включать"]]) {
+      if (!brief[key]) continue;
+      const row = el("p", "ai-preserve-lines"); row.append(el("strong", "", `${title}: `), document.createTextNode(sanitizeText(brief[key]))); section.append(row);
+    }
+    section.append(el("p", "field-help", "Для сотрудника КЦ и клиента · Было / Стало / Действия / Подсказки"));
+    return section;
+  }
+
+  function renderClarifications() {
+    const section = el("section", "ai-panel ai-clarifications");
+    section.setAttribute("aria-labelledby", "aiClarificationsHeading");
+    section.setAttribute("aria-busy", String(state.clarificationSubmitting));
+    const heading = el("h3", "ai-section-title", "Короткие уточнения"); heading.id = "aiClarificationsHeading";
+    section.append(heading, el("p", "field-help", "Ответьте на вопросы, которые влияют на инструкцию. Если ответа нет, продолжите с отметками о пробелах: ИИ не должен их придумывать."));
+    for (const [index, question] of (state.job.clarifications || []).slice(0, 3).entries()) {
+      const input = el("textarea", "ai-task-textarea");
+      input.id = `aiClarification${index}`; input.rows = 3; input.maxLength = MAX_BRIEF_CHARS;
+      input.value = state.clarificationAnswers[question.id] || "";
+      input.dataset.aiClarification = question.id; input.disabled = state.clarificationSubmitting;
+      input.placeholder = "Ваш ответ или уточнение по источнику"; input.autocomplete = "off";
+      const wrapper = field(sanitizeText(question.question), input, sanitizeText(question.reason) || "Если не знаете ответа, оставьте поле пустым и выберите продолжение с пробелами.");
+      const error = el("p", "ai-error-copy", "Ответьте на вопрос или выберите «Продолжить с пробелами».");
+      error.id = `${input.id}-error`; error.hidden = !state.clarificationErrors.has(question.id); error.setAttribute("role", "alert");
+      if (!error.hidden) input.setAttribute("aria-invalid", "true");
+      input.setAttribute("aria-describedby", `${input.id}-help ${error.id}`);
+      wrapper.append(error); section.append(wrapper);
+    }
+    section.append(el("p", "field-help", "Уточнения будут сохранены после нажатия кнопки. При внешнем подключении они проходят проверку перед отправкой, как и исходные материалы."));
+    return section;
+  }
 
   function renderJobHistory() {
     const section = el("section", "ai-job-history ai-panel");
@@ -1504,7 +1660,10 @@
     const list = el("ul", "ai-job-list");
     for (const job of state.jobs) {
       const item = el("li", "ai-job-row");
-      item.append(el("span", "", `${JOB_LABELS[job.status] || job.status} · ${job.completed}/${job.total} · ${job.model || job.providerId} · ${new Date(job.createdAt).toLocaleString("ru-RU")}`));
+      const copy = el("span");
+      if (job.brief?.topic) copy.append(el("strong", "ai-job-topic", sanitizeText(job.brief.topic)));
+      copy.append(document.createTextNode(`${JOB_LABELS[job.status] || job.status} · ${job.completed}/${job.total} · ${job.model || job.providerId} · ${new Date(job.createdAt).toLocaleString("ru-RU")}`));
+      item.append(copy);
       const open = button("Открыть обработку", "button secondary small", "open-job"); open.dataset.jobId = job.id; item.append(open); list.append(item);
     }
     section.append(list);
@@ -1512,12 +1671,40 @@
     return section;
   }
 
+  function renderJobError(error, job) {
+    const recovery = error.recovery === "retry-unfinished";
+    const card = statusCallout(recovery ? "warning" : "error", error.title || "Что произошло и как продолжить", error.message);
+    card.classList.add("ai-job-recovery");
+    const copy = card.lastElementChild;
+    if (recovery) {
+      const saved = job.completed > 0 || job.factsCount > 0 || job.hasResult;
+      copy.append(el("p", "field-help", saved ? "Готовые результаты сохранены. Программа продолжит незавершённые этапы всех материалов и использует сохранённые ответы." : "Повтор использует сохранённые этапы, если они есть. Указывать номера строк или редактировать документ не требуется."));
+      const actions = el("div", "ai-recovery-actions");
+      const retry = button("Повторить незавершённое", "button secondary", "retry-analysis");
+      retry.disabled = state.busy || jobBusy(job) || ["clarification", "confirmation"].includes(job.status);
+      if (state.busy) retry.setAttribute("aria-busy", "true");
+      actions.append(retry);
+      if (job.hasResult) actions.append(button("Проверить готовое", "button secondary", "job-result"));
+      if (!jobBusy(job)) actions.append(button("Настройки обработки", "button secondary", "job-settings"));
+      actions.querySelectorAll("button").forEach((control) => { if (state.busy) control.disabled = true; });
+      copy.append(actions);
+      copy.append(el("p", "field-help", jobBusy(job) ? "Повтор станет доступен после завершения текущей обработки." : ["clarification", "confirmation"].includes(job.status) ? "Сначала завершите текущий шаг: ответьте на уточнения или подтвердите отправку." : "Если ошибка повторится, выберите другую модель в настройках и нажмите «Сохранить настройки для продолжения»."));
+    }
+    if (error.technicalDetails) {
+      const details = el("details", "ai-error-details");
+      details.append(el("summary", "", "Подробности для поддержки"), el("p", "ai-preserve-lines", error.technicalDetails));
+      copy.append(details);
+    }
+    return card;
+  }
+
   function renderDurableJob() {
     const job = state.job; const fragment = document.createDocumentFragment();
     const head = el("section", "ai-analysis-head"); head.append(el("p", "eyebrow", "Обработка с сохранением этапов"), el("h3", "", `${JOB_LABELS[job.status] || job.status} · ${job.model || job.providerId}`));
     head.append(el("p", "", "Можно закрыть это окно или обновить страницу: сервер продолжит работу. При выключении программы или компьютера обработка остановится; после запуска нажмите «Продолжить».")); fragment.append(head);
+    if (job.brief?.topic) fragment.append(renderBriefSummary(job.brief));
     const progress = el("section", "ai-durable-progress"); progress.setAttribute("role", "status"); progress.setAttribute("aria-live", "polite");
-    progress.append(el("strong", "", `Готово ${job.completed} из ${job.total} материалов`));
+    progress.append(el("strong", "", `${job.brief?.topic ? "Разобрано" : "Готово"} ${job.completed} из ${job.total} материалов`));
     const bar = el("progress"); bar.max = Math.max(1, job.total); bar.value = job.completed; bar.setAttribute("aria-label", "Завершённые материалы"); progress.append(bar);
     progress.append(el("p", "", job.progress?.message || "Ожидает запуска"));
     if (job.progress?.sourceName) progress.append(el("p", "ai-progress-source", job.progress.sourceName));
@@ -1527,6 +1714,7 @@
       progress.append(el("p", "field-help", `Текущий запрос: ${Math.floor(seconds / 60)} мин ${seconds % 60} с. Лимит: ${Math.ceil((job.progress.timeoutMs || 600000) / 60000)} мин.`));
     }
     fragment.append(progress);
+    if (job.factsCount > 0 && !job.hasResult) fragment.append(el("p", "field-help", "Факты сохранены. Инструкция появится после объединения и проверки по выбранной теме."));
     if (job.status === "uploading" && !state.busy) {
       const input = el("input"); input.type = "file"; input.multiple = true; input.accept = ACCEPTED_EXTENSIONS.map((ext) => `.${ext}`).join(",");
       input.addEventListener("change", () => {
@@ -1537,13 +1725,15 @@
       if (state.files.length) fragment.append(el("p", "field-help", `Выбрано файлов для продолжения: ${state.files.length}`));
     }
     if (job.status === "confirmation") fragment.append(renderPiiReview());
-    if (state.analysisError) fragment.append(statusCallout("error", "Что произошло и как продолжить", state.analysisError));
+    if (job.status === "clarification") fragment.append(renderClarifications());
+    if (state.analysisError) fragment.append(job.error?.message === state.analysisError ? renderJobError(job.error, job) : statusCallout("error", "Что произошло и как продолжить", state.analysisError));
     const list = el("ul", "ai-job-materials");
+    if (job.files.some((file) => file.error?.recovery)) list.classList.add("has-recovery");
     for (const file of job.files) {
       const item = el("li", `ai-job-material is-${file.status}`);
-      item.append(el("strong", "", file.name), el("span", "ai-material-state", ({ complete: "Готово", partial: "Готово частично", failed: "Не завершено", running: "Обрабатывается", ready: "В очереди", uploading: "Загружается" })[file.status] || file.status));
+      item.append(el("strong", "", file.name), el("span", "ai-material-state", file.error?.recovery === "retry-unfinished" ? "Нужна повторная обработка" : ({ complete: "Готово", partial: "Готово частично", failed: "Не завершено", running: "Обрабатывается", ready: "В очереди", uploading: "Загружается" })[file.status] || file.status));
       if (file.sectionsTotal > 1) item.append(el("p", "field-help", `Готово разделов: ${file.sectionsDone || 0} из ${file.sectionsTotal}`));
-      if (file.error) item.append(el("p", "ai-error-copy", file.error.message));
+      if (file.error) item.append(renderJobError(file.error, job));
       for (const warning of file.warnings || []) item.append(el("p", "field-help", warning));
       list.append(item);
     }
@@ -1552,6 +1742,7 @@
     if (job.hasResult) actions.append(button("Скачать результат JSON", "button secondary", "job-download"));
     actions.append(button("Новая обработка", "button secondary", "job-new"));
     if (!jobBusy(job)) actions.append(button("Удалить обработку…", "button danger-ghost", "job-delete"));
+    if (state.busy || state.clarificationSubmitting) actions.querySelectorAll("button").forEach((control) => { control.disabled = true; });
     fragment.append(actions);
     if (state.deleteJobPending) {
       const confirmation = statusCallout("warning", "Удалить материалы и результаты этой обработки?", "Сохранённые копии и этапы будут удалены с компьютера. Исходные файлы останутся на месте. Отменить удаление нельзя.");
@@ -1667,6 +1858,45 @@
     return rail;
   }
 
+  function renderInstructionPreview() {
+    const draft = state.proposal?.draft;
+    if (!draft || !Object.keys(draft).length) return null;
+    const panel = el("section", "ai-panel ai-instruction-preview");
+    panel.setAttribute("aria-labelledby", "aiInstructionPreviewHeading");
+    const heading = el("h3", "ai-section-title", "Инструкция целиком"); heading.id = "aiInstructionPreviewHeading";
+    panel.append(heading, el("p", "field-help", "Это предложенный текст до применения. Прочитайте его целиком, затем ниже отметьте поля, которые нужно перенести в черновик."));
+    const article = el("article", "ai-instruction-copy");
+    const appendField = (container, label, value) => {
+      const text = Array.isArray(value) ? displayValue(value) : sanitizeText(value);
+      if (!text) return;
+      const block = el("div", "ai-instruction-field");
+      block.append(el("strong", "", label), el("p", "ai-preserve-lines", text)); container.append(block);
+    };
+    if (draft.title) article.append(el("h4", "ai-instruction-title", sanitizeText(draft.title)));
+    for (const key of ["releaseDate", "rolloutMode", "rolloutConditions"]) appendField(article, FIELD_LABELS[key], draft[key]);
+    for (const group of Array.isArray(draft.groups) ? draft.groups : []) {
+      const section = el("section", "ai-instruction-group");
+      if (group.title) section.append(el("h4", "", sanitizeText(group.title)));
+      for (const key of ["channels", "location", "availability"]) appendField(section, FIELD_LABELS[key], group[key]);
+      for (const item of Array.isArray(group.items) ? group.items : []) {
+        const change = el("section", "ai-instruction-item");
+        if (item.title) change.append(el("h5", "", sanitizeText(item.title)));
+        for (const [key, label] of [["before", "Было"], ["after", "Стало"], ["clientAction", "Действия клиента"], ["supportNote", "Подсказки сотруднику"]]) appendField(change, label, item[key]);
+        if (change.childElementCount) section.append(change);
+      }
+      if (section.childElementCount) article.append(section);
+    }
+    const support = draft.support || {};
+    for (const [key, label] of [["say", "Готовый текст для клиента"], ["dontSay", "Что не обещать клиенту"], ["details", "Дополнительные сведения для сотрудника"]]) appendField(article, label, support[key]);
+    if (Array.isArray(support.faq) && support.faq.length) {
+      const faq = el("section", "ai-instruction-group"); faq.append(el("h4", "", "Ответы на вопросы"));
+      for (const entry of support.faq) appendField(faq, sanitizeText(entry.question), entry.answer);
+      article.append(faq);
+    }
+    if (!article.childElementCount) return null;
+    panel.append(article); return panel;
+  }
+
   function renderReview() {
     const fragment = document.createDocumentFragment();
     state.plan = buildPlan();
@@ -1688,6 +1918,10 @@
     }
     if (state.localPiiWarning) fragment.append(statusCallout("warning", "В материалах есть признаки персональных данных", "Обработка разрешена, потому что выбран локальный или корпоративный контур. Проверьте, что его правила допускают эти данные."));
     if (state.analysisError) fragment.append(statusCallout("error", "Нужна проверка", state.analysisError));
+
+    if (state.job?.brief?.topic) fragment.append(renderBriefSummary(state.job.brief));
+    const preview = renderInstructionPreview();
+    if (preview) fragment.append(preview);
 
     const summary = el("section", "ai-review-summary");
     const copy = el("div");
@@ -1757,7 +1991,7 @@
       const item = el("li", `ai-step${index === state.step ? " is-current" : ""}${index < state.step ? " is-complete" : ""}`);
       const control = button(name, "ai-step-button");
       control.dataset.aiStep = String(index);
-      control.disabled = index > state.step || state.busy || state.applying;
+      control.disabled = index > state.step || state.busy || state.applying || state.clarificationSubmitting;
       control.setAttribute("aria-current", index === state.step ? "step" : "false");
       const number = el("span", "ai-step-number", index < state.step ? "✓" : String(index + 1));
       number.setAttribute("aria-hidden", "true");
@@ -1773,19 +2007,28 @@
     status.setAttribute("role", "status");
     status.setAttribute("aria-live", "polite");
     if (state.step === 0) status.textContent = state.online ? "Настройки сохраняются только локально." : "Нужно запустить локальный модуль.";
-    if (state.step === 1) status.textContent = hasMaterials() ? `${materialCountLabel()} готово к анализу.` : "Добавьте файл или вставьте текст.";
+    if (state.step === 1) status.textContent = !state.brief.topic.trim() ? "Укажите тему инструкции в задании для ИИ." : hasMaterials() ? `${materialCountLabel()} готово к анализу по теме.` : "Добавьте файл или вставьте текст.";
     if (state.step === 2) status.textContent = state.busy ? "Запрос выполняется…" : state.piiPreflightReady ? "Ожидается подтверждение." : "Черновик ещё не изменён.";
     if (state.step === 3) status.textContent = state.applied ? "Изменения применены." : "Применятся только отмеченные поля.";
     refs.footer.append(status);
     if (state.job && state.step === 2) {
+      if (state.job.status === "clarification") {
+        status.textContent = state.clarificationSubmitting ? "Сохраняем уточнения…" : "Ответьте или продолжите с отмеченными пробелами.";
+        const submit = button("Сохранить ответы и продолжить", "button primary ai-clarification-submit", "submit-clarifications");
+        const skip = button("Продолжить с пробелами", "button secondary", "skip-clarifications");
+        submit.disabled = skip.disabled = state.clarificationSubmitting;
+        if (state.clarificationSubmitting) submit.setAttribute("aria-busy", "true");
+        refs.footer.append(submit, skip);
+        return;
+      }
       if (state.busy) refs.footer.append(button("Приостановить", "button secondary", "cancel-analysis"));
       else if (state.job.status === "confirmation") {
         const proceed = button("Подтвердить отправку", "button primary", "confirm-analyze"); proceed.disabled = !state.confirmedNoPersonalData; refs.footer.append(proceed);
       } else {
-        if (state.job.status !== "complete") refs.footer.append(button(state.job.status === "uploading" ? "Продолжить загрузку" : "Продолжить незавершённое", "button primary", "retry-analysis"));
+        if (state.job.status !== "complete") refs.footer.append(button(state.job.status === "uploading" ? "Продолжить загрузку" : ["partial", "failed"].includes(state.job.status) ? "Повторить незавершённое" : "Продолжить незавершённое", "button primary", "retry-analysis"));
         refs.footer.append(button("Настройки обработки", "button secondary", "job-settings"));
       }
-      if (state.job.hasResult) refs.footer.append(button("Проверить готовое", "button primary", "job-result"));
+      if (state.job.hasResult) refs.footer.append(button("Проверить готовое", state.job.status === "complete" ? "button primary" : "button secondary", "job-result"));
       else if (state.job.status === "failed") refs.footer.append(button("Продолжить без изменений", "button secondary", "continue-without-changes"));
       return;
     }
@@ -1840,6 +2083,7 @@
     refs.subtitle.textContent = `Шаг ${state.step + 1} из ${STEPS.length}`;
     renderFooter();
     if (state.step === 1) global.queueMicrotask(() => resizeManualTextArea(document.getElementById("aiManualText")));
+    global.queueMicrotask(() => refs.body.querySelectorAll(".ai-task-textarea").forEach(resizeTaskTextarea));
   }
 
   function handleSettingChange(target) {
@@ -1916,7 +2160,8 @@
     } else if (action === "job-download") {
       await downloadJobResult();
     } else if (action === "job-new") {
-      stopJobPolling(); state.busy = false; resetAnalysis(); state.files = []; state.manualText = ""; state.step = 1; render();
+      if (state.busy || state.clarificationSubmitting) return;
+      stopJobPolling(); state.busy = false; resetAnalysis(); state.files = []; state.manualText = ""; state.brief = { topic: "", include: "", exclude: "", audience: "both" }; state.briefError = ""; state.step = 1; render();
     } else if (action === "job-delete") {
       state.deleteJobPending = !state.deleteJobPending; render();
     } else if (action === "job-delete-confirm") {
@@ -1944,6 +2189,8 @@
       await performAnalysis(false);
     } else if (action === "confirm-analyze") {
       await performAnalysis(true);
+    } else if (action === "submit-clarifications" || action === "skip-clarifications") {
+      await submitClarifications(action === "skip-clarifications");
     } else if (action === "continue-without-changes") {
       continueWithoutChanges();
     } else if (action === "cancel-analysis") {
@@ -1988,6 +2235,16 @@
     refs.dialog.addEventListener("input", (event) => {
       const target = event.target;
       if (target.matches("[data-ai-manual-text]")) handleManualTextInput(target);
+      else if (target.matches("[data-ai-brief]")) handleBriefInput(target);
+      else if (target.matches("[data-ai-clarification]")) {
+        const id = target.dataset.aiClarification;
+        state.clarificationAnswers[id] = target.value.slice(0, MAX_BRIEF_CHARS);
+        if (target.value.trim()) {
+          state.clarificationErrors.delete(id); target.removeAttribute("aria-invalid");
+          const error = document.getElementById(`${target.id}-error`); if (error) error.hidden = true;
+        }
+        resizeTaskTextarea(target);
+      }
       else if (target.matches("[data-ai-setting]")) handleSettingChange(target);
     });
     refs.dialog.addEventListener("change", (event) => {
@@ -1998,7 +2255,7 @@
         target.value = "";
       } else if (target.matches("[data-ai-file-role]")) {
         const entry = state.files.find((file) => file.id === target.dataset.aiFileRole);
-        if (entry) entry.role = target.value;
+        if (entry) { entry.role = target.value; resetAnalysis(); renderFooter(); }
       } else if (target.matches("[data-ai-merge-mode]")) {
         state.mergeMode = target.value === "replace-selected" ? "replace-selected" : "fill-empty";
         resetAnalysis();

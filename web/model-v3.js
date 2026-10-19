@@ -51,7 +51,7 @@
         .replace(/<\s*br\s*\/?>/gi, "\n")
         .replace(/<\/(?:div|h[1-6]|li|ol|p|section|ul)>/gi, "\n")
         .replace(/<li(?:\s[^>]*)?>/gi, "• ")
-        .replace(/<[^>]*>/g, "")
+        .replace(/<!--[^]*?-->|<\/?[a-z][a-z0-9:-]*(?:\s[^<>]*)?\s*\/?>/gi, "")
     )
       .replace(/\r\n?/g, "\n")
       .replace(/[ \t]+\n/g, "\n")
